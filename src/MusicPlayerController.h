@@ -8,8 +8,14 @@
 #include <QAudioOutput>
 #include <QMediaPlayer>
 #include <QObject>
+#include <QElapsedTimer>
+#include <QHash>
+#include <QSet>
+#include <QThread>
 #include <QUrl>
 #include <QVariantList>
+
+class ImportScanWorker;
 
 class MusicPlayerController : public QObject
 {
@@ -28,6 +34,7 @@ class MusicPlayerController : public QObject
 
 public:
     explicit MusicPlayerController(QObject *parent = nullptr);
+    ~MusicPlayerController() override;
 
     TrackListModel *trackModel();
     int currentIndex() const;
@@ -52,6 +59,8 @@ public:
     Q_INVOKABLE QString formatTime(qint64 milliseconds) const;
 
 signals:
+    void importFilesRequested(int requestId, const QStringList &filePaths);
+    void importFolderRequested(int requestId, const QString &folderPath, const QStringList &nameFilters);
     void currentIndexChanged();
     void currentTrackChanged();
     void positionChanged(qint64 position);
@@ -65,9 +74,14 @@ signals:
 private:
     void updateCoverArt();
     void setCoverArtUrl(const QUrl &url);
-    QUrl createGeneratedCoverArt() const;
-    QUrl saveCoverArtImage(const QImage &image, const QString &suffix) const;
-    void appendSources(const QStringList &filePaths);
+    QUrl createGeneratedCoverArt(const QUrl &source) const;
+    void stopPlaybackImmediately();
+    void beginFileImport(const QStringList &filePaths);
+    void beginFolderImport(const QString &folderPath);
+    void handleImportedTracks(int requestId, const QList<TrackListModel::TrackItem> &tracks);
+    void handleTrackMetadataResolved(int requestId, const QUrl &source, qint64 duration, const QUrl &coverArtUrl);
+    void handleImportFinished(int requestId, int emittedCount, bool hadInput);
+    QString sourceKey(const QUrl &source) const;
     QStringList audioNameFilters() const;
     QString audioDialogFilter() const;
     QVariantList toVariantList(const QVector<qreal> &values) const;
@@ -76,9 +90,17 @@ private:
     QMediaPlayer m_player;
     QAudioOutput m_audioOutput;
     QAudioBufferOutput m_audioBufferOutput;
+    QThread m_importThread;
+    ImportScanWorker *m_importWorker = nullptr;
     TrackListModel m_trackModel;
     SpectrumAnalyzer m_spectrumAnalyzer;
     QVariantList m_spectrumValues;
+    QElapsedTimer m_spectrumFrameTimer;
+    QSet<QString> m_knownSourceKeys;
+    QHash<QString, int> m_sourceIndexMap;
+    QSet<int> m_autoplayRequestIds;
+    QHash<int, int> m_importAddedCounts;
+    int m_nextImportRequestId = 0;
     int m_currentIndex = -1;
     QUrl m_coverArtUrl;
     QString m_errorMessage;

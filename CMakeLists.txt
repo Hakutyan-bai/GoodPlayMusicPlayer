@@ -21,14 +21,27 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS
 
 qt_standard_project_setup(REQUIRES 6.8)
 
-qt_add_executable(musicplayer
+set(MUSICPLAYER_SOURCES
+    src/ImportScanWorker.cpp
+    src/ImportScanWorker.h
     src/main.cpp
     src/MusicPlayerController.cpp
     src/MusicPlayerController.h
     src/SpectrumAnalyzer.cpp
     src/SpectrumAnalyzer.h
+    src/TrackImportUtils.cpp
+    src/TrackImportUtils.h
     src/TrackListModel.cpp
     src/TrackListModel.h
+    resources/app_resources.qrc
+)
+
+if (WIN32)
+    list(APPEND MUSICPLAYER_SOURCES resources/app_icon.rc)
+endif()
+
+qt_add_executable(musicplayer
+    ${MUSICPLAYER_SOURCES}
 )
 
 qt_add_qml_module(musicplayer
@@ -40,6 +53,7 @@ qt_add_qml_module(musicplayer
         qml/components/GlassPanel.qml
         qml/components/MediaSlider.qml
         qml/components/SpectrumRing.qml
+        qml/components/TitleBarButton.qml
 )
 
 target_link_libraries(musicplayer

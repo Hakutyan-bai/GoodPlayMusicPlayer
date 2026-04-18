@@ -1,66 +1,22 @@
 #include "MusicPlayerController.h"
 
-#include <QDir>
-#include <QDirIterator>
+#include "ImportScanWorker.h"
+#include "TrackImportUtils.h"
+
+#include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QFileDialog>
-#include <QFileInfo>
 #include <QImage>
-#include <QMediaMetaData>
+#include <QMetaType>
 #include <QPainter>
 #include <QPainterPath>
 #include <QStandardPaths>
-#include <QDateTime>
-#include <QCryptographicHash>
 
 #include <algorithm>
 
 namespace {
 
-QString composeSubtitle(const QFileInfo &info)
-{
-    const QString folderName = info.dir().dirName();
-    const QString extension = info.suffix().toUpper();
-
-    if (folderName.isEmpty()) {
-        return extension;
-    }
-
-    if (extension.isEmpty()) {
-        return folderName;
-    }
-
-    return QStringLiteral("%1  ·  %2").arg(folderName, extension);
-}
-
-QImage circularCoverImage(const QImage &sourceImage, int size = 720)
-{
-    if (sourceImage.isNull()) {
-        return {};
-    }
-
-    const QImage scaled =
-        sourceImage.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-    const QPoint topLeft((scaled.width() - size) / 2, (scaled.height() - size) / 2);
-
-    QImage target(size, size, QImage::Format_ARGB32_Premultiplied);
-    target.fill(Qt::transparent);
-
-    QPainter painter(&target);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-
-    QPainterPath clipPath;
-    clipPath.addEllipse(QRectF(2, 2, size - 4, size - 4));
-    painter.setClipPath(clipPath);
-    painter.drawImage(QRect(0, 0, size, size), scaled, QRect(topLeft, QSize(size, size)));
-    painter.setClipping(false);
-
-    painter.setPen(QPen(QColor(255, 255, 255, 48), 4));
-    painter.drawEllipse(QRectF(4, 4, size - 8, size - 8));
-    painter.end();
-
-    return target;
-}
+constexpr qint64 SpectrumFrameIntervalMs = 33;
 
 } // namespace
 
@@ -68,10 +24,44 @@ MusicPlayerController::MusicPlayerController(QObject *parent)
     : QObject(parent)
     , m_trackModel(this)
 {
+    qRegisterMetaType<TrackListModel::TrackItem>("TrackListModel::TrackItem");
+    qRegisterMetaType<QList<TrackListModel::TrackItem>>("QList<TrackListModel::TrackItem>");
+
     m_audioOutput.setVolume(0.78);
     m_player.setAudioOutput(&m_audioOutput);
     m_player.setAudioBufferOutput(&m_audioBufferOutput);
     m_spectrumValues = toVariantList(QVector<qreal>(SpectrumAnalyzer::BandCount, 0.0));
+    m_spectrumFrameTimer.start();
+
+    m_importWorker = new ImportScanWorker();
+    m_importWorker->moveToThread(&m_importThread);
+    connect(&m_importThread, &QThread::finished, m_importWorker, &QObject::deleteLater);
+    connect(this,
+            &MusicPlayerController::importFilesRequested,
+            m_importWorker,
+            &ImportScanWorker::importFiles,
+            Qt::QueuedConnection);
+    connect(this,
+            &MusicPlayerController::importFolderRequested,
+            m_importWorker,
+            &ImportScanWorker::importFolder,
+            Qt::QueuedConnection);
+    connect(m_importWorker,
+            &ImportScanWorker::tracksReady,
+            this,
+            &MusicPlayerController::handleImportedTracks,
+            Qt::QueuedConnection);
+    connect(m_importWorker,
+            &ImportScanWorker::trackMetadataResolved,
+            this,
+            &MusicPlayerController::handleTrackMetadataResolved,
+            Qt::QueuedConnection);
+    connect(m_importWorker,
+            &ImportScanWorker::importFinished,
+            this,
+            &MusicPlayerController::handleImportFinished,
+            Qt::QueuedConnection);
+    m_importThread.start();
 
     connect(&m_player, &QMediaPlayer::positionChanged, this, &MusicPlayerController::positionChanged);
     connect(&m_player, &QMediaPlayer::durationChanged, this, [this](qint64 duration) {
@@ -83,11 +73,9 @@ MusicPlayerController::MusicPlayerController(QObject *parent)
     connect(&m_player, &QMediaPlayer::playingChanged, this, &MusicPlayerController::playingChanged);
     connect(&m_player, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
         if (status == QMediaPlayer::EndOfMedia) {
-            if (m_currentIndex >= 0 && m_currentIndex < (m_trackModel.rowCount() - 1)) {
-                playAt(m_currentIndex + 1);
-            } else {
-                m_player.stop();
-                m_player.setPosition(0);
+            const int total = m_trackModel.rowCount();
+            if (total > 0) {
+                playAt((m_currentIndex + 1 + total) % total);
             }
         }
     });
@@ -105,13 +93,32 @@ MusicPlayerController::MusicPlayerController(QObject *parent)
             &QAudioBufferOutput::audioBufferReceived,
             this,
             [this](const QAudioBuffer &buffer) {
-                const QVariantList analyzedValues = toVariantList(m_spectrumAnalyzer.analyze(buffer));
-                if (analyzedValues != m_spectrumValues) {
-                    m_spectrumValues = analyzedValues;
-                    emit spectrumValuesChanged();
+                if (m_spectrumFrameTimer.isValid()
+                    && m_spectrumFrameTimer.elapsed() < SpectrumFrameIntervalMs) {
+                    return;
                 }
+
+                m_spectrumFrameTimer.restart();
+                m_spectrumValues = toVariantList(m_spectrumAnalyzer.analyze(buffer));
+                emit spectrumValuesChanged();
             });
     connect(&m_player, &QMediaPlayer::metaDataChanged, this, &MusicPlayerController::updateCoverArt);
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, [this]() {
+        stopPlaybackImmediately();
+        if (m_importWorker) {
+            m_importWorker->requestCancel();
+        }
+    });
+}
+
+MusicPlayerController::~MusicPlayerController()
+{
+    stopPlaybackImmediately();
+    if (m_importWorker) {
+        m_importWorker->requestCancel();
+    }
+    m_importThread.quit();
+    m_importThread.wait();
 }
 
 TrackListModel *MusicPlayerController::trackModel()
@@ -187,7 +194,7 @@ void MusicPlayerController::openFiles()
         startDirectory,
         audioDialogFilter());
 
-    appendSources(files);
+    beginFileImport(files);
 }
 
 void MusicPlayerController::openFolder()
@@ -200,17 +207,7 @@ void MusicPlayerController::openFolder()
         startDirectory,
         QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
 
-    if (folder.isEmpty()) {
-        return;
-    }
-
-    QStringList files;
-    QDirIterator iterator(folder, audioNameFilters(), QDir::Files, QDirIterator::Subdirectories);
-    while (iterator.hasNext()) {
-        files.append(iterator.next());
-    }
-
-    appendSources(files);
+    beginFolderImport(folder);
 }
 
 void MusicPlayerController::playPause()
@@ -243,7 +240,11 @@ void MusicPlayerController::playAt(int index)
 
     setErrorMessage({});
     m_player.setSource(track.source);
-    setCoverArtUrl(createGeneratedCoverArt());
+    if (track.coverArtUrl.isEmpty() || TrackImportUtils::isDefaultCoverArtUrl(track.coverArtUrl)) {
+        setCoverArtUrl(createGeneratedCoverArt(track.source));
+    } else {
+        setCoverArtUrl(track.coverArtUrl);
+    }
     m_player.play();
 
     emit currentIndexChanged();
@@ -310,43 +311,117 @@ QString MusicPlayerController::formatTime(qint64 milliseconds) const
         .arg(seconds, 2, 10, QChar(u'0'));
 }
 
-void MusicPlayerController::appendSources(const QStringList &filePaths)
+void MusicPlayerController::beginFileImport(const QStringList &filePaths)
 {
-    QList<TrackListModel::TrackItem> tracksToAdd;
-
-    for (const QString &path : filePaths) {
-        const QFileInfo info(path);
-        if (!info.exists() || !info.isFile()) {
-            continue;
-        }
-
-        const QUrl source = QUrl::fromLocalFile(info.absoluteFilePath());
-        if (m_trackModel.containsSource(source)) {
-            continue;
-        }
-
-        TrackListModel::TrackItem track;
-        track.title = info.completeBaseName().isEmpty() ? info.fileName() : info.completeBaseName();
-        track.subtitle = composeSubtitle(info);
-        track.path = info.absoluteFilePath();
-        track.source = source;
-        tracksToAdd.append(track);
-    }
-
-    if (tracksToAdd.isEmpty()) {
-        if (!filePaths.isEmpty()) {
-            setErrorMessage(tr("没有找到可导入的新音频文件。"));
-        }
+    if (filePaths.isEmpty()) {
         return;
     }
 
-    const bool shouldAutoplay = (m_trackModel.rowCount() == 0);
-    m_trackModel.addTracks(tracksToAdd);
+    const int requestId = ++m_nextImportRequestId;
+    m_importAddedCounts.insert(requestId, 0);
+    if (m_trackModel.rowCount() == 0 && m_currentIndex < 0) {
+        m_autoplayRequestIds.insert(requestId);
+    }
+
+    emit importFilesRequested(requestId, filePaths);
+}
+
+void MusicPlayerController::beginFolderImport(const QString &folderPath)
+{
+    if (folderPath.isEmpty()) {
+        return;
+    }
+
+    const int requestId = ++m_nextImportRequestId;
+    m_importAddedCounts.insert(requestId, 0);
+    if (m_trackModel.rowCount() == 0 && m_currentIndex < 0) {
+        m_autoplayRequestIds.insert(requestId);
+    }
+
+    emit importFolderRequested(requestId, folderPath, audioNameFilters());
+}
+
+void MusicPlayerController::handleImportedTracks(int requestId, const QList<TrackListModel::TrackItem> &tracks)
+{
+    QList<TrackListModel::TrackItem> filteredTracks;
+    filteredTracks.reserve(tracks.size());
+
+    for (const TrackListModel::TrackItem &track : tracks) {
+        const QString key = sourceKey(track.source);
+        if (key.isEmpty() || m_knownSourceKeys.contains(key)) {
+            continue;
+        }
+
+        m_knownSourceKeys.insert(key);
+        TrackListModel::TrackItem preparedTrack = track;
+        if (preparedTrack.coverArtUrl.isEmpty()) {
+            preparedTrack.coverArtUrl = TrackImportUtils::defaultCoverArtUrl();
+        }
+        filteredTracks.append(preparedTrack);
+    }
+
+    if (filteredTracks.isEmpty()) {
+        return;
+    }
+
+    const int firstInsertedIndex = m_trackModel.rowCount();
+    m_trackModel.addTracks(filteredTracks);
+    for (int i = 0; i < filteredTracks.size(); ++i) {
+        m_sourceIndexMap.insert(sourceKey(filteredTracks.at(i).source), firstInsertedIndex + i);
+    }
+    m_importAddedCounts[requestId] = m_importAddedCounts.value(requestId) + filteredTracks.count();
     setErrorMessage({});
 
-    if (shouldAutoplay) {
-        playAt(0);
+    if (m_autoplayRequestIds.contains(requestId) && m_currentIndex < 0) {
+        m_autoplayRequestIds.remove(requestId);
+        playAt(firstInsertedIndex);
     }
+}
+
+void MusicPlayerController::handleTrackMetadataResolved(int requestId,
+                                                        const QUrl &source,
+                                                        qint64 duration,
+                                                        const QUrl &coverArtUrl)
+{
+    Q_UNUSED(requestId)
+
+    const QString key = sourceKey(source);
+    if (key.isEmpty() || !m_sourceIndexMap.contains(key)) {
+        return;
+    }
+
+    const int index = m_sourceIndexMap.value(key);
+    if (duration > 0) {
+        m_trackModel.setTrackDuration(index, duration);
+    }
+
+    if (!coverArtUrl.isEmpty()) {
+        m_trackModel.setTrackCoverArt(index, coverArtUrl);
+        if (index == m_currentIndex) {
+            setCoverArtUrl(coverArtUrl);
+        }
+    }
+}
+
+void MusicPlayerController::handleImportFinished(int requestId, int emittedCount, bool hadInput)
+{
+    Q_UNUSED(emittedCount)
+
+    const int addedCount = m_importAddedCounts.take(requestId);
+    m_autoplayRequestIds.remove(requestId);
+
+    if (addedCount == 0 && hadInput) {
+        setErrorMessage(tr("没有找到可导入的新音频文件。"));
+    }
+}
+
+QString MusicPlayerController::sourceKey(const QUrl &source) const
+{
+    if (source.isLocalFile()) {
+        return source.toLocalFile();
+    }
+
+    return source.toString();
 }
 
 QStringList MusicPlayerController::audioNameFilters() const
@@ -390,6 +465,14 @@ void MusicPlayerController::setErrorMessage(const QString &message)
     emit errorMessageChanged();
 }
 
+void MusicPlayerController::stopPlaybackImmediately()
+{
+    m_player.stop();
+    m_player.setSource(QUrl());
+    m_player.setPosition(0);
+    m_audioOutput.setVolume(0.0);
+}
+
 void MusicPlayerController::updateCoverArt()
 {
     if (m_currentIndex < 0) {
@@ -397,27 +480,17 @@ void MusicPlayerController::updateCoverArt()
         return;
     }
 
-    const QMediaMetaData metaData = m_player.metaData();
+    const TrackListModel::TrackItem track = m_trackModel.at(m_currentIndex);
+    const QUrl embeddedCoverUrl = TrackImportUtils::coverArtUrlFromMetaData(track.source, m_player.metaData());
+    const QUrl coverUrl = embeddedCoverUrl.isEmpty()
+                              ? ((track.coverArtUrl.isEmpty()
+                                  || TrackImportUtils::isDefaultCoverArtUrl(track.coverArtUrl))
+                                     ? createGeneratedCoverArt(track.source)
+                                     : track.coverArtUrl)
+                              : embeddedCoverUrl;
 
-    const QVariant coverVariant = metaData.value(QMediaMetaData::CoverArtImage);
-    if (coverVariant.canConvert<QImage>()) {
-        const QImage coverImage = qvariant_cast<QImage>(coverVariant);
-        if (!coverImage.isNull()) {
-            setCoverArtUrl(saveCoverArtImage(coverImage, QStringLiteral("cover")));
-            return;
-        }
-    }
-
-    const QVariant thumbnailVariant = metaData.value(QMediaMetaData::ThumbnailImage);
-    if (thumbnailVariant.canConvert<QImage>()) {
-        const QImage thumbnailImage = qvariant_cast<QImage>(thumbnailVariant);
-        if (!thumbnailImage.isNull()) {
-            setCoverArtUrl(saveCoverArtImage(thumbnailImage, QStringLiteral("thumb")));
-            return;
-        }
-    }
-
-    setCoverArtUrl(createGeneratedCoverArt());
+    m_trackModel.setTrackCoverArt(m_currentIndex, coverUrl);
+    setCoverArtUrl(coverUrl);
 }
 
 void MusicPlayerController::setCoverArtUrl(const QUrl &url)
@@ -430,15 +503,13 @@ void MusicPlayerController::setCoverArtUrl(const QUrl &url)
     emit coverArtUrlChanged();
 }
 
-QUrl MusicPlayerController::createGeneratedCoverArt() const
+QUrl MusicPlayerController::createGeneratedCoverArt(const QUrl &source) const
 {
-    if (m_currentIndex < 0) {
+    if (source.isEmpty()) {
         return {};
     }
 
-    const TrackListModel::TrackItem track = m_trackModel.at(m_currentIndex);
-    const QByteArray digest =
-        QCryptographicHash::hash(track.source.toString().toUtf8(), QCryptographicHash::Sha1);
+    const QByteArray digest = QCryptographicHash::hash(source.toString().toUtf8(), QCryptographicHash::Sha1);
 
     auto colorFromDigest = [&digest](int offset) {
         return QColor::fromHsl(
@@ -489,31 +560,5 @@ QUrl MusicPlayerController::createGeneratedCoverArt() const
     painter.drawEllipse(QPointF(image.width() * 0.5, image.height() * 0.5), 18, 18);
 
     painter.end();
-    return saveCoverArtImage(image, QStringLiteral("generated"));
-}
-
-QUrl MusicPlayerController::saveCoverArtImage(const QImage &image, const QString &suffix) const
-{
-    if (m_currentIndex < 0 || image.isNull()) {
-        return {};
-    }
-
-    const TrackListModel::TrackItem track = m_trackModel.at(m_currentIndex);
-    const QString cacheDirPath =
-        QStandardPaths::writableLocation(QStandardPaths::TempLocation) + QStringLiteral("/GoodPlayMusicPlayer");
-    QDir cacheDir(cacheDirPath);
-    if (!cacheDir.exists()) {
-        cacheDir.mkpath(QStringLiteral("."));
-    }
-
-    const QByteArray digest =
-        QCryptographicHash::hash(track.source.toString().toUtf8(), QCryptographicHash::Sha1).toHex();
-    const QString filePath = cacheDir.filePath(QStringLiteral("%1_%2.png").arg(QString::fromLatin1(digest), suffix));
-
-    const QImage circularImage = circularCoverImage(image);
-    circularImage.save(filePath, "PNG");
-
-    QUrl url = QUrl::fromLocalFile(filePath);
-    url.setQuery(QStringLiteral("v=%1").arg(QDateTime::currentMSecsSinceEpoch()));
-    return url;
+    return TrackImportUtils::saveCoverArtImage(source, image, QStringLiteral("generated"));
 }

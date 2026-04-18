@@ -36,8 +36,8 @@ Item {
             const cy = h / 2
             const half = Math.min(w, h) / 2
             const discRadius = half * 0.33
-            const innerRadius = discRadius + 26
-            const maxBarLength = Math.max(32, half - innerRadius - 16)
+            const innerRadius = discRadius + 22
+            const maxBarLength = Math.max(46, half - innerRadius - 10)
             const count = Math.max(1, root.values.length)
             const glow = root.active ? 1.0 : 0.55
 
@@ -56,12 +56,12 @@ Item {
                 const value = Number(root.values[i] || 0)
                 const angle = (Math.PI * 2 * i) / count - Math.PI / 2
                 const strength = Math.min(1.0, Math.max(0.0, value))
-                const outerRadius = innerRadius + maxBarLength * (0.30 + strength * 0.70)
+                const outerRadius = innerRadius + maxBarLength * (0.42 + strength * 0.92)
                 const startX = cx + Math.cos(angle) * innerRadius
                 const startY = cy + Math.sin(angle) * innerRadius
                 const endX = cx + Math.cos(angle) * outerRadius
                 const endY = cy + Math.sin(angle) * outerRadius
-                const widthScale = 2.4 + strength * 4.4
+                const widthScale = 2.8 + strength * 4.8
 
                 ctx.beginPath()
                 ctx.moveTo(startX, startY)

@@ -12,9 +12,12 @@ ApplicationWindow {
     minimumHeight: 720
     visible: true
     title: "音乐播放器"
+    flags: Qt.Window | Qt.FramelessWindowHint
 
     property bool lightMode: false
     property real discAngle: 0
+    readonly property bool maximized: visibility === Window.Maximized
+    readonly property int sceneMargin: maximized ? 14 : 28
 
     readonly property color accent: lightMode ? "#1b8fb2" : "#79f2cf"
     readonly property color accentSecondary: lightMode ? "#4d79f3" : "#55a6ff"
@@ -36,15 +39,7 @@ ApplicationWindow {
     readonly property color discShellBorder: lightMode ? "#31163143" : "#22ffffff"
     readonly property color discOverlay: lightMode ? "#08ffffff" : "#0a06111b"
     readonly property color errorColor: lightMode ? "#d05b4f" : "#ff9f8d"
-
-    function mixColor(a, b, t) {
-        return Qt.rgba(
-            a.r + (b.r - a.r) * t,
-            a.g + (b.g - a.g) * t,
-            a.b + (b.b - a.b) * t,
-            a.a + (b.a - a.a) * t
-        )
-    }
+    readonly property color titleBarLine: lightMode ? "#16163143" : "#12ffffff"
 
     color: windowBase
 
@@ -118,7 +113,7 @@ ApplicationWindow {
 
     Item {
         anchors.fill: parent
-        anchors.margins: 28
+        anchors.margins: window.sceneMargin
 
         ColumnLayout {
             anchors.fill: parent
@@ -126,45 +121,127 @@ ApplicationWindow {
 
             GlassPanel {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 92
+                Layout.preferredHeight: 154
                 lightMode: window.lightMode
                 tintA: window.panelTintA
                 tintB: window.panelTintB
                 borderTint: window.panelBorder
 
-                RowLayout {
+                ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 24
-                    spacing: 18
-
-                    ColumnLayout {
-                        spacing: 4
-
-                        Label {
-                            text: "GoodPlay 音乐"
-                            color: window.textPrimary
-                            font.pixelSize: 26
-                            font.weight: Font.DemiBold
-                        }
-
-                        Label {
-                            text: "简约桌面播放器 · 音乐律动频谱"
-                            color: window.textSecondary
-                            font.pixelSize: 13
-                        }
-                    }
+                    anchors.margins: 18
+                    spacing: 14
 
                     Item {
                         Layout.fillWidth: true
+                        Layout.preferredHeight: 38
+
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            onPressed: mouse => {
+                                if (mouse.button === Qt.LeftButton) {
+                                    window.startSystemMove()
+                                }
+                            }
+                            onDoubleClicked: {
+                                if (window.maximized) {
+                                    window.showNormal()
+                                } else {
+                                    window.showMaximized()
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            anchors.fill: parent
+                            spacing: 14
+
+                            Rectangle {
+                                Layout.preferredWidth: 34
+                                Layout.preferredHeight: 34
+                                radius: 12
+                                color: window.lightMode ? "#dce9f5" : "#163041"
+                                border.width: 1
+                                border.color: window.lightMode ? "#22163143" : "#18ffffff"
+
+                                Rectangle {
+                                    anchors.centerIn: parent
+                                    width: 12
+                                    height: 12
+                                    radius: 6
+                                    color: window.accent
+                                }
+                            }
+
+                            ColumnLayout {
+                                spacing: 1
+
+                                Label {
+                                    text: "GoodPlay 音乐播放器"
+                                    color: window.textPrimary
+                                    font.pixelSize: 16
+                                    font.weight: Font.DemiBold
+                                }
+
+                                Label {
+                                    text: "现代桌面播放器 · 环形频谱律动"
+                                    color: window.textSecondary
+                                    font.pixelSize: 11
+                                }
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
+                            }
+
+                            RowLayout {
+                                spacing: 8
+
+                                TitleBarButton {
+                                    lightMode: window.lightMode
+                                    buttonRole: "minimize"
+                                    onClicked: window.showMinimized()
+                                }
+
+                                TitleBarButton {
+                                    lightMode: window.lightMode
+                                    buttonRole: "maximize"
+                                    maximized: window.maximized
+                                    onClicked: {
+                                        if (window.maximized) {
+                                            window.showNormal()
+                                        } else {
+                                            window.showMaximized()
+                                        }
+                                    }
+                                }
+
+                                TitleBarButton {
+                                    lightMode: window.lightMode
+                                    buttonRole: "close"
+                                    danger: true
+                                    onClicked: window.close()
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        radius: 1
+                        color: window.titleBarLine
                     }
 
                     RowLayout {
+                        Layout.fillWidth: true
                         spacing: 12
 
                         Repeater {
                             model: [
                                 { label: "打开文件", width: 132, action: function() { playerController.openFiles() } },
-                                { label: "打开文件夹", width: 138, action: function() { playerController.openFolder() } },
+                                { label: "打开文件夹", width: 144, action: function() { playerController.openFolder() } },
                                 { label: window.lightMode ? "深色界面" : "浅色界面", width: 128, action: function() { window.lightMode = !window.lightMode } }
                             ]
 
@@ -177,9 +254,13 @@ ApplicationWindow {
                                 highlighted: index === 2
                                 radius: 16
                                 implicitWidth: modelData.width
-                                implicitHeight: 48
+                                implicitHeight: 46
                                 onClicked: modelData.action()
                             }
+                        }
+
+                        Item {
+                            Layout.fillWidth: true
                         }
                     }
                 }
@@ -213,7 +294,7 @@ ApplicationWindow {
                         Label {
                             text: playerController.trackModel.count > 0
                                   ? playerController.trackModel.count + " 首歌曲"
-                                  : "打开音频文件或整个文件夹后自动导入"
+                                  : "打开音频文件或文件夹后自动导入"
                             color: window.textMuted
                             font.pixelSize: 13
                         }
@@ -233,6 +314,7 @@ ApplicationWindow {
                                 required property string title
                                 required property string subtitle
                                 required property double duration
+                                required property url coverArtUrl
 
                                 width: playlistView.width - 6
                                 height: 76
@@ -250,22 +332,50 @@ ApplicationWindow {
                                     anchors.margins: 16
                                     spacing: 14
 
-                                    Rectangle {
-                                        Layout.preferredWidth: 42
-                                        Layout.preferredHeight: 42
-                                        radius: 16
-                                        color: index === playerController.currentIndex
-                                               ? window.badgeActiveColor
-                                               : window.badgeColor
+                                    Item {
+                                        Layout.preferredWidth: 50
+                                        Layout.preferredHeight: 50
 
-                                        Label {
-                                            anchors.centerIn: parent
-                                            text: index === playerController.currentIndex ? "播放中" : (index + 1)
-                                            color: window.lightMode && index !== playerController.currentIndex
-                                                   ? "#183b57"
-                                                   : "white"
-                                            font.pixelSize: index === playerController.currentIndex ? 11 : 13
-                                            font.weight: Font.DemiBold
+                                        Rectangle {
+                                            anchors.fill: parent
+                                            radius: 18
+                                            color: window.lightMode ? "#ffffff" : "#0d1520"
+                                            border.width: 1
+                                            border.color: index === playerController.currentIndex
+                                                          ? window.listBorderActiveColor
+                                                          : (window.lightMode ? "#22163143" : "#18ffffff")
+                                        }
+
+                                        Image {
+                                            anchors.fill: parent
+                                            anchors.margins: 3
+                                            source: coverArtUrl
+                                            fillMode: Image.PreserveAspectFit
+                                            asynchronous: true
+                                            cache: false
+                                            mipmap: true
+                                        }
+
+                                        Rectangle {
+                                            anchors.right: parent.right
+                                            anchors.bottom: parent.bottom
+                                            anchors.rightMargin: -2
+                                            anchors.bottomMargin: -2
+                                            width: 16
+                                            height: 16
+                                            radius: 8
+                                            visible: index === playerController.currentIndex
+                                            color: window.accent
+                                            border.width: 2
+                                            border.color: window.lightMode ? "#ffffff" : "#0d1520"
+
+                                            Rectangle {
+                                                anchors.centerIn: parent
+                                                width: 5
+                                                height: 5
+                                                radius: 2.5
+                                                color: window.lightMode ? "#0f2b3e" : "#03111b"
+                                            }
                                         }
                                     }
 
@@ -373,7 +483,7 @@ ApplicationWindow {
                                 Rectangle {
                                     id: centerDisc
                                     anchors.centerIn: parent
-                                    width: 148
+                                    width: Math.max(148, Math.min(276, visualizer.width * 0.34))
                                     height: width
                                     radius: width / 2
                                     color: window.discShellColor
@@ -398,7 +508,7 @@ ApplicationWindow {
 
                                     Rectangle {
                                         anchors.centerIn: parent
-                                        width: 24
+                                        width: Math.max(22, centerDisc.width * 0.16)
                                         height: width
                                         radius: width / 2
                                         color: window.accent
@@ -410,7 +520,7 @@ ApplicationWindow {
 
                                 Rectangle {
                                     anchors.centerIn: parent
-                                    width: centerDisc.width + 12
+                                    width: centerDisc.width + Math.max(12, centerDisc.width * 0.08)
                                     height: width
                                     radius: width / 2
                                     color: "#00000000"

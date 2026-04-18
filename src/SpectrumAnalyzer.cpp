@@ -19,7 +19,7 @@ QVector<qreal> extractSamplesTyped(const QAudioBuffer &buffer, qreal divisor, qr
         return {};
     }
 
-    const qsizetype targetFrames = std::min<qsizetype>(frameCount, 1024);
+    const qsizetype targetFrames = std::min<qsizetype>(frameCount, 512);
     const qsizetype firstFrame = frameCount - targetFrames;
     const SampleType *raw = buffer.constData<SampleType>();
 
@@ -70,7 +70,7 @@ QVector<qreal> SpectrumAnalyzer::analyze(const QAudioBuffer &buffer)
     }
 
     const int fftSize =
-        largestPowerOfTwo(static_cast<int>(std::min<qsizetype>(monoSamples.size(), 512)));
+        largestPowerOfTwo(static_cast<int>(std::min<qsizetype>(monoSamples.size(), 256)));
     monoSamples = monoSamples.last(fftSize);
 
     QVector<qreal> windowed(fftSize, 0.0);

@@ -32,6 +32,8 @@ QVariant TrackListModel::data(const QModelIndex &index, int role) const
         return track.source;
     case PathRole:
         return track.path;
+    case CoverArtRole:
+        return track.coverArtUrl;
     default:
         return {};
     }
@@ -44,7 +46,8 @@ QHash<int, QByteArray> TrackListModel::roleNames() const
         { SubtitleRole, "subtitle" },
         { DurationRole, "duration" },
         { SourceRole, "source" },
-        { PathRole, "path" }
+        { PathRole, "path" },
+        { CoverArtRole, "coverArtUrl" }
     };
 }
 
@@ -105,4 +108,20 @@ void TrackListModel::setTrackDuration(int index, qint64 duration)
     track.duration = duration;
     const QModelIndex modelIndex = createIndex(index, 0);
     emit dataChanged(modelIndex, modelIndex, { DurationRole });
+}
+
+void TrackListModel::setTrackCoverArt(int index, const QUrl &coverArtUrl)
+{
+    if (index < 0 || index >= m_tracks.count()) {
+        return;
+    }
+
+    TrackItem &track = m_tracks[index];
+    if (track.coverArtUrl == coverArtUrl) {
+        return;
+    }
+
+    track.coverArtUrl = coverArtUrl;
+    const QModelIndex modelIndex = createIndex(index, 0);
+    emit dataChanged(modelIndex, modelIndex, { CoverArtRole });
 }
