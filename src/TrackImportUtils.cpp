@@ -74,7 +74,7 @@ QString composeSubtitle(const QFileInfo &info)
         return folderName;
     }
 
-    return QStringLiteral("%1  路  %2").arg(folderName, extension);
+    return QStringLiteral("%1  ·  %2").arg(folderName, extension);
 }
 
 QUrl defaultCoverArtUrl()
@@ -156,22 +156,21 @@ QUrl extractCoverArtWithFfmpeg(const QUrl &source)
     }
 
     const QByteArray digest = QCryptographicHash::hash(source.toString().toUtf8(), QCryptographicHash::Sha1).toHex();
-    const QString rawOutputPath = cacheDir.filePath(QStringLiteral("%1_ffmpeg_cover.png").arg(QString::fromLatin1(digest)));
+    const QString rawOutputPath =
+        cacheDir.filePath(QStringLiteral("%1_ffmpeg_cover.png").arg(QString::fromLatin1(digest)));
     QFile::remove(rawOutputPath);
 
     QProcess process;
     process.start(ffmpegExecutable,
-                  {
-                      QStringLiteral("-y"),
-                      QStringLiteral("-loglevel"),
-                      QStringLiteral("error"),
-                      QStringLiteral("-i"),
-                      source.toLocalFile(),
-                      QStringLiteral("-an"),
-                      QStringLiteral("-frames:v"),
-                      QStringLiteral("1"),
-                      rawOutputPath
-                  });
+                  {QStringLiteral("-y"),
+                   QStringLiteral("-loglevel"),
+                   QStringLiteral("error"),
+                   QStringLiteral("-i"),
+                   source.toLocalFile(),
+                   QStringLiteral("-an"),
+                   QStringLiteral("-frames:v"),
+                   QStringLiteral("1"),
+                   rawOutputPath});
 
     if (!process.waitForFinished(3000) || process.exitStatus() != QProcess::NormalExit
         || process.exitCode() != 0 || !QFileInfo::exists(rawOutputPath)) {
