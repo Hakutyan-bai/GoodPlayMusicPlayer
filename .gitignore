@@ -1,0 +1,10 @@
+build/
+dist/
+installer/
+
+.vs/
+.vscode/
+*.user
+*.suo
+*.tmp
+*.log

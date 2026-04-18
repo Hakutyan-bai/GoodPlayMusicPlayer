@@ -1,0 +1,580 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import "components"
+
+ApplicationWindow {
+    id: window
+
+    width: 1380
+    height: 860
+    minimumWidth: 1120
+    minimumHeight: 720
+    visible: true
+    title: "音乐播放器"
+
+    property bool lightMode: false
+    property real discAngle: 0
+
+    readonly property color accent: lightMode ? "#1b8fb2" : "#79f2cf"
+    readonly property color accentSecondary: lightMode ? "#4d79f3" : "#55a6ff"
+    readonly property color windowBase: lightMode ? "#edf3f8" : "#07111b"
+    readonly property color panelBorder: lightMode ? "#22163143" : "#1dffffff"
+    readonly property color textPrimary: lightMode ? "#12283b" : "#ffffff"
+    readonly property color textSecondary: lightMode ? "#4f6a80" : "#96bfd4"
+    readonly property color textMuted: lightMode ? "#617d92" : "#8eb0c0"
+    readonly property color textDim: lightMode ? "#6e889b" : "#9cb8c6"
+    readonly property color panelTintA: lightMode ? "#dbe9f5" : "#13273a"
+    readonly property color panelTintB: lightMode ? "#eef4fa" : "#0d1522"
+    readonly property color listItemColor: lightMode ? "#f8fbfe" : "#101a27"
+    readonly property color listItemActiveColor: lightMode ? "#e2edf8" : "#1b2d40"
+    readonly property color listBorderColor: lightMode ? "#1e163143" : "#12ffffff"
+    readonly property color listBorderActiveColor: lightMode ? "#5d6ff0a8" : "#3d79f2cf"
+    readonly property color badgeColor: lightMode ? "#d8e7f5" : "#173047"
+    readonly property color badgeActiveColor: lightMode ? "#cae9f0" : "#2479f2cf"
+    readonly property color discShellColor: lightMode ? "#f7fbff" : "#0b1520"
+    readonly property color discShellBorder: lightMode ? "#31163143" : "#22ffffff"
+    readonly property color discOverlay: lightMode ? "#08ffffff" : "#0a06111b"
+    readonly property color errorColor: lightMode ? "#d05b4f" : "#ff9f8d"
+
+    function mixColor(a, b, t) {
+        return Qt.rgba(
+            a.r + (b.r - a.r) * t,
+            a.g + (b.g - a.g) * t,
+            a.b + (b.b - a.b) * t,
+            a.a + (b.a - a.a) * t
+        )
+    }
+
+    color: windowBase
+
+    background: Rectangle {
+        color: window.windowBase
+
+        Rectangle {
+            width: parent.width * 0.62
+            height: parent.height * 0.52
+            x: -width * 0.14
+            y: -height * 0.08
+            radius: width / 2
+            color: "#00000000"
+            gradient: Gradient {
+                GradientStop {
+                    position: 0.0
+                    color: window.lightMode ? "#4855a6ff" : "#3055a6ff"
+                }
+                GradientStop { position: 1.0; color: "#00000000" }
+            }
+            rotation: -18
+        }
+
+        Rectangle {
+            width: parent.width * 0.46
+            height: parent.height * 0.36
+            x: parent.width - width * 0.85
+            y: parent.height - height * 0.82
+            radius: width / 2
+            color: "#00000000"
+            gradient: Gradient {
+                GradientStop {
+                    position: 0.0
+                    color: window.lightMode ? "#3679f2cf" : "#2879f2cf"
+                }
+                GradientStop { position: 1.0; color: "#00000000" }
+            }
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: "#00000000"
+
+            Canvas {
+                anchors.fill: parent
+                opacity: window.lightMode ? 0.10 : 0.18
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.reset()
+                    ctx.strokeStyle = window.lightMode ? "rgba(17,40,60,0.06)" : "rgba(255,255,255,0.05)"
+                    ctx.lineWidth = 1
+
+                    const gap = 54
+                    for (let x = 0; x < width; x += gap) {
+                        ctx.beginPath()
+                        ctx.moveTo(x, 0)
+                        ctx.lineTo(x, height)
+                        ctx.stroke()
+                    }
+
+                    for (let y = 0; y < height; y += gap) {
+                        ctx.beginPath()
+                        ctx.moveTo(0, y)
+                        ctx.lineTo(width, y)
+                        ctx.stroke()
+                    }
+                }
+            }
+        }
+    }
+
+    Item {
+        anchors.fill: parent
+        anchors.margins: 28
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 22
+
+            GlassPanel {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 92
+                lightMode: window.lightMode
+                tintA: window.panelTintA
+                tintB: window.panelTintB
+                borderTint: window.panelBorder
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 24
+                    spacing: 18
+
+                    ColumnLayout {
+                        spacing: 4
+
+                        Label {
+                            text: "GoodPlay 音乐"
+                            color: window.textPrimary
+                            font.pixelSize: 26
+                            font.weight: Font.DemiBold
+                        }
+
+                        Label {
+                            text: "简约桌面播放器 · 音乐律动频谱"
+                            color: window.textSecondary
+                            font.pixelSize: 13
+                        }
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                    }
+
+                    RowLayout {
+                        spacing: 12
+
+                        Repeater {
+                            model: [
+                                { label: "打开文件", width: 132, action: function() { playerController.openFiles() } },
+                                { label: "打开文件夹", width: 138, action: function() { playerController.openFolder() } },
+                                { label: window.lightMode ? "深色界面" : "浅色界面", width: 128, action: function() { window.lightMode = !window.lightMode } }
+                            ]
+
+                            delegate: ActionButton {
+                                text: modelData.label
+                                lightMode: window.lightMode
+                                accentA: window.accentSecondary
+                                accentB: window.accent
+                                outlined: index < 2
+                                highlighted: index === 2
+                                radius: 16
+                                implicitWidth: modelData.width
+                                implicitHeight: 48
+                                onClicked: modelData.action()
+                            }
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 22
+
+                GlassPanel {
+                    Layout.preferredWidth: 360
+                    Layout.fillHeight: true
+                    lightMode: window.lightMode
+                    tintA: window.panelTintA
+                    tintB: window.panelTintB
+                    borderTint: window.panelBorder
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 22
+                        spacing: 18
+
+                        Label {
+                            text: "播放列表"
+                            color: window.textPrimary
+                            font.pixelSize: 20
+                            font.weight: Font.DemiBold
+                        }
+
+                        Label {
+                            text: playerController.trackModel.count > 0
+                                  ? playerController.trackModel.count + " 首歌曲"
+                                  : "打开音频文件或整个文件夹后自动导入"
+                            color: window.textMuted
+                            font.pixelSize: 13
+                        }
+
+                        ListView {
+                            id: playlistView
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            spacing: 10
+                            rightMargin: 6
+                            model: playerController.trackModel
+                            currentIndex: playerController.currentIndex
+
+                            delegate: Rectangle {
+                                required property int index
+                                required property string title
+                                required property string subtitle
+                                required property double duration
+
+                                width: playlistView.width - 6
+                                height: 76
+                                radius: 22
+                                color: index === playerController.currentIndex
+                                       ? window.listItemActiveColor
+                                       : window.listItemColor
+                                border.width: 1
+                                border.color: index === playerController.currentIndex
+                                              ? window.listBorderActiveColor
+                                              : window.listBorderColor
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 14
+
+                                    Rectangle {
+                                        Layout.preferredWidth: 42
+                                        Layout.preferredHeight: 42
+                                        radius: 16
+                                        color: index === playerController.currentIndex
+                                               ? window.badgeActiveColor
+                                               : window.badgeColor
+
+                                        Label {
+                                            anchors.centerIn: parent
+                                            text: index === playerController.currentIndex ? "播放中" : (index + 1)
+                                            color: window.lightMode && index !== playerController.currentIndex
+                                                   ? "#183b57"
+                                                   : "white"
+                                            font.pixelSize: index === playerController.currentIndex ? 11 : 13
+                                            font.weight: Font.DemiBold
+                                        }
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 4
+
+                                        Label {
+                                            text: title
+                                            color: window.textPrimary
+                                            font.pixelSize: 15
+                                            font.weight: Font.Medium
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+
+                                        Label {
+                                            text: subtitle
+                                            color: window.textSecondary
+                                            font.pixelSize: 12
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+
+                                    Label {
+                                        text: duration > 0 ? playerController.formatTime(duration) : "--:--"
+                                        color: window.textDim
+                                        font.pixelSize: 12
+                                    }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: playerController.playAt(index)
+                                }
+                            }
+
+                            ScrollBar.vertical: ScrollBar {
+                                policy: ScrollBar.AlwaysOff
+                                visible: false
+                            }
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    spacing: 22
+
+                    GlassPanel {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        lightMode: window.lightMode
+                        tintA: window.panelTintA
+                        tintB: window.panelTintB
+                        borderTint: window.panelBorder
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 28
+                            spacing: 12
+
+                            Label {
+                                text: "正在播放"
+                                color: window.textMuted
+                                font.pixelSize: 14
+                            }
+
+                            Label {
+                                text: playerController.currentTitle
+                                color: window.textPrimary
+                                font.pixelSize: 34
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+
+                            Label {
+                                text: playerController.currentSubtitle
+                                color: window.textSecondary
+                                font.pixelSize: 15
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+
+                                SpectrumRing {
+                                    id: visualizer
+                                    anchors.centerIn: parent
+                                    width: Math.min(parent.width, parent.height) * 0.84
+                                    height: width
+                                    values: playerController.spectrumValues
+                                    accentColor: window.accent
+                                    secondaryColor: window.accentSecondary
+                                    active: playerController.playing
+                                    lightMode: window.lightMode
+                                }
+
+                                Rectangle {
+                                    id: centerDisc
+                                    anchors.centerIn: parent
+                                    width: 148
+                                    height: width
+                                    radius: width / 2
+                                    color: window.discShellColor
+                                    border.width: 2
+                                    border.color: window.discShellBorder
+                                    rotation: window.discAngle
+
+                                    Image {
+                                        anchors.fill: parent
+                                        source: playerController.coverArtUrl
+                                        fillMode: Image.PreserveAspectFit
+                                        asynchronous: true
+                                        cache: false
+                                        mipmap: true
+                                    }
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: width / 2
+                                        color: window.discOverlay
+                                    }
+
+                                    Rectangle {
+                                        anchors.centerIn: parent
+                                        width: 24
+                                        height: width
+                                        radius: width / 2
+                                        color: window.accent
+                                        opacity: 0.92
+                                        border.width: 2
+                                        border.color: window.lightMode ? "#88ffffff" : "#ccffffff"
+                                    }
+                                }
+
+                                Rectangle {
+                                    anchors.centerIn: parent
+                                    width: centerDisc.width + 12
+                                    height: width
+                                    radius: width / 2
+                                    color: "#00000000"
+                                    border.width: 1
+                                    border.color: window.lightMode ? "#18142c40" : "#18ffffff"
+                                }
+
+                                Timer {
+                                    interval: 16
+                                    repeat: true
+                                    running: playerController.playing
+                                    onTriggered: {
+                                        window.discAngle = (window.discAngle + (360 * interval / 22000)) % 360
+                                    }
+                                }
+                            }
+
+                            Label {
+                                visible: playerController.errorMessage.length > 0
+                                text: playerController.errorMessage
+                                color: window.errorColor
+                                font.pixelSize: 13
+                            }
+                        }
+                    }
+
+                    GlassPanel {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 176
+                        lightMode: window.lightMode
+                        tintA: window.panelTintA
+                        tintB: window.panelTintB
+                        borderTint: window.panelBorder
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 22
+                            spacing: 16
+
+                            RowLayout {
+                                Layout.fillWidth: true
+
+                                Label {
+                                    text: playerController.formatTime(playerController.position)
+                                    color: window.textPrimary
+                                    font.pixelSize: 13
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                Label {
+                                    text: playerController.formatTime(playerController.duration)
+                                    color: window.textMuted
+                                    font.pixelSize: 13
+                                }
+                            }
+
+                            MediaSlider {
+                                id: progressSlider
+                                Layout.fillWidth: true
+                                from: 0
+                                to: Math.max(1, playerController.duration)
+                                value: playerController.position
+                                trackHeight: 8
+                                handleSize: 20
+                                trackColor: window.lightMode ? "#d8e7f2" : "#163145"
+                                fillColor: window.accent
+                                fillColorSecondary: window.accentSecondary
+                                handleColor: window.lightMode ? "#ffffff" : "white"
+                                handleBorderColor: window.accent
+                                handleBorderWidth: 3
+
+                                onMoved: playerController.setPosition(value)
+                                onEditingFinished: playerController.setPosition(value)
+
+                                Connections {
+                                    target: playerController
+
+                                    function onPositionChanged(position) {
+                                        if (!progressSlider.pressed) {
+                                            progressSlider.value = position
+                                        }
+                                    }
+
+                                    function onDurationChanged(duration) {
+                                        progressSlider.to = Math.max(1, duration)
+                                        if (!progressSlider.pressed) {
+                                            progressSlider.value = Math.min(playerController.position, progressSlider.to)
+                                        }
+                                    }
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 14
+
+                                Repeater {
+                                    model: [
+                                        { label: "上一首", width: 94, action: function() { playerController.previous() } },
+                                        { label: playerController.playing ? "暂停" : "播放", width: 124, action: function() { playerController.playPause() } },
+                                        { label: "下一首", width: 94, action: function() { playerController.next() } }
+                                    ]
+
+                                    delegate: ActionButton {
+                                        text: modelData.label
+                                        lightMode: window.lightMode
+                                        accentA: window.accentSecondary
+                                        accentB: window.accent
+                                        highlighted: index === 1
+                                        implicitWidth: modelData.width
+                                        implicitHeight: 54
+                                        radius: 18
+                                        onClicked: modelData.action()
+                                    }
+                                }
+
+                                Item {
+                                    Layout.fillWidth: true
+                                }
+
+                                ColumnLayout {
+                                    spacing: 6
+
+                                    Label {
+                                        text: "音量 " + Math.round(playerController.volume * 100) + "%"
+                                        color: window.textPrimary
+                                        font.pixelSize: 13
+                                    }
+
+                                    MediaSlider {
+                                        id: volumeSlider
+                                        Layout.preferredWidth: 220
+                                        from: 0
+                                        to: 1
+                                        value: playerController.volume
+                                        trackHeight: 6
+                                        handleSize: 16
+                                        trackColor: window.lightMode ? "#d8e7f2" : "#163145"
+                                        fillColor: window.accent
+                                        fillColorSecondary: window.accent
+                                        handleColor: window.lightMode ? "#ffffff" : "white"
+                                        handleBorderColor: window.accentSecondary
+                                        handleBorderWidth: 2
+
+                                        onMoved: playerController.setVolume(value)
+                                        onEditingFinished: playerController.setVolume(value)
+
+                                        Connections {
+                                            target: playerController
+
+                                            function onVolumeChanged() {
+                                                if (!volumeSlider.pressed) {
+                                                    volumeSlider.value = playerController.volume
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
